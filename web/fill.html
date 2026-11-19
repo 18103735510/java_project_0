@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>填写问卷</title>
+</head>
+<body>
+<h1 id="title">填写问卷</h1>
+<p><a href="/">返回首页</a></p>
+<hr>
+<form id="answer-form">
+<p>昵称：<input id="submitter" size="24" placeholder="同一昵称只能提交一次"></p>
+<div id="questions"></div>
+<p><button type="submit">提交问卷</button></p>
+</form>
+<pre id="result"></pre>
+<script>
+const params = new URLSearchParams(location.search);
+const questionnaireId = params.get('id');
+const formEl = document.getElementById('answer-form');
+const questionsEl = document.getElementById('questions');
+const resultEl = document.getElementById('result');
+let questionnaire = null;
+
+async function api(path, options) {
+  const response = await fetch(path, options);
+  let body;
+  try {
+    body = await response.json();
+  } catch (error) {
+    throw new Error('HTTP ' + response.status);
+  }
+  if (!body.ok) {
+    throw new Error(body.error || ('HTTP ' + response.status));
+  }
+  return body.data;
+}
+
+function node(tag, text) {
+  const element = document.createElement(tag);
+  if (text !== undefined) {
+    element.textContent = text;
+  }
+  return element;
+}
+
+function render() {
+  document.getElementById('title').textContent = `#${questionnaire.id}　${questionnaire.title}`;
+  for (const question of questionnaire.questions) {
+    const block = node('div', null);
+    block.append(node('p', `${question.typeLabel}｜${question.title}`));
+
+    if (question.type === 'SINGLE' || question.type === 'MULTI') {
+      for (const option of question.options) {
+        const label = node('label', null);
+        const input = document.createElement('input');
+        input.type = question.type === 'SINGLE' ? 'radio' : 'checkbox';
+        input.name = 'q' + question.id;
+        input.value = option.key;
+        label.append(input, ' ' + option.label);
+        block.append(label, document.createElement('br'));
+      }
+    } else if (question.type === 'SCALE') {
+      const select = document.createElement('select');
+      select.name = 'q' + question.id;
+      const empty = node('option', '-- 请选择 --');
+      empty.value = '';
+      select.append(empty);
+      for (let value = question.min; value <= question.max; value++) {
+        const option = node('option', value + ' 分');
+        option.value = String(value);
+        select.append(option);
+      }
+      block.append(select);
+    } else {
+      const textarea = document.createElement('textarea');
+      textarea.name = 'q' + question.id;
+      textarea.rows = 3;
+      textarea.cols = 60;
+      block.append(textarea);
+    }
+    questionsEl.append(block);
+  }
+}
+
+function collectAnswers() {
+  const answers = [];
+  for (const question of questionnaire.questions) {
+    const fields = formEl.querySelectorAll(`[name="q${question.id}"]`);
+    const values = [];
+    for (const field of fields) {
+      if (field.type === 'checkbox' || field.type === 'radio') {
+        if (field.checked) {
+          values.push(field.value);
+        }
+      } else if (values.length === 0) {
+        values.push(field.value);
+      }
+    }
+    answers.push({ questionId: question.id, values });
+  }
+  return answers;
+}
+
+formEl.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  resultEl.textContent = '提交中……';
+  try {
+    const data = await api(`/api/questionnaires/${questionnaire.id}/responses`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        submitter: document.getElementById('submitter').value,
+        answers: collectAnswers()
+      })
+    });
+    resultEl.textContent = `${data.message}\n答卷编号：${data.submissionId}\n提交时间：${data.submittedAt}\n\n统计页：/stats.html?id=${questionnaire.id}`;
+    formEl.querySelectorAll('input, textarea, select, button').forEach((element) => {
+      element.disabled = true;
+    });
+  } catch (error) {
+    resultEl.textContent = '提交失败：' + error.message;
+  }
+});
+
+(async function init() {
+  if (!questionnaireId) {
+    resultEl.textContent = '缺少问卷编号，请从首页进入。';
+    formEl.hidden = true;
+    return;
+  }
+  try {
+    questionnaire = await api('/api/questionnaires/' + encodeURIComponent(questionnaireId));
+    render();
+    if (questionnaire.status !== 'PUBLISHED') {
+      resultEl.textContent = `提示：该问卷当前是「${questionnaire.statusLabel}」，暂不接受填写。`;
+      formEl.querySelectorAll('input, textarea, select, button').forEach((element) => {
+        element.disabled = true;
+      });
+    }
+  } catch (error) {
+    resultEl.textContent = '加载失败：' + error.message;
+  }
+})();
+</script>
+</body>
+</html>

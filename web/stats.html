@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>统计结果</title>
+</head>
+<body>
+<h1>统计结果</h1>
+<p>
+<a href="/">返回首页</a>　
+<a id="format-text" href="#">纯文本</a>　
+<a id="format-json" href="#">JSON</a>　
+<a id="format-csv" href="#">CSV</a>　
+<a id="refresh" href="#">刷新</a>
+</p>
+<hr>
+<pre id="output">加载中……</pre>
+<script>
+const params = new URLSearchParams(location.search);
+const questionnaireId = params.get('id');
+const format = (params.get('format') || 'text').toLowerCase();
+const outputEl = document.getElementById('output');
+
+for (const name of ['text', 'json', 'csv']) {
+  document.getElementById('format-' + name).href = `?id=${questionnaireId}&format=${name}`;
+}
+document.getElementById('refresh').href = `?id=${questionnaireId}&format=${format}`;
+
+(async function () {
+  if (!questionnaireId) {
+    outputEl.textContent = '缺少问卷编号，请从首页进入。';
+    return;
+  }
+  try {
+    const response = await fetch(`/api/questionnaires/${encodeURIComponent(questionnaireId)}/statistics?format=${format}`);
+    outputEl.textContent = await response.text();
+  } catch (error) {
+    outputEl.textContent = '加载失败：' + error.message;
+  }
+})();
+</script>
+</body>
+</html>

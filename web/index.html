@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>问卷调查统计系统</title>
+</head>
+<body>
+<h1>问卷调查统计系统</h1>
+<p>纯 Java 后端 + 原生 HTML 前端（演示版，无任何样式）</p>
+<hr>
+<h2>问卷列表</h2>
+<p id="message"></p>
+<ul id="list">
+<li>加载中……</li>
+</ul>
+<hr>
+<h2>新建问卷</h2>
+<form id="create-form">
+<p>问卷标题：<input id="title" size="50" value="团队协作满意度调查"></p>
+<p>题目定义（JSON 数组，一个对象一道题）：</p>
+<p><textarea id="questions" rows="20" cols="100"></textarea></p>
+<p><button type="submit">创建问卷</button>　创建后是草稿，需要在列表里点「发布」才能填写</p>
+</form>
+<hr>
+<h2>题型说明</h2>
+<ul>
+<li>SCALE：打分题，必须给 min / max。示例：{"type":"SCALE","title":"整体满意度","min":1,"max":5}</li>
+<li>SINGLE：单选题，必须给 options（key + label）。</li>
+<li>MULTI：多选题，必须给 options（key + label）。</li>
+<li>TEXT：填空题，不需要 options。</li>
+</ul>
+<script>
+const listEl = document.getElementById('list');
+const messageEl = document.getElementById('message');
+
+const TEMPLATE = [
+  {"type": "SCALE", "title": "整体满意度（1-5 分）", "min": 1, "max": 5},
+  {"type": "SINGLE", "title": "你最常使用的时间段", "options": [
+    {"key": "A", "label": "上午"},
+    {"key": "B", "label": "下午"},
+    {"key": "C", "label": "晚上"}
+  ]},
+  {"type": "MULTI", "title": "你希望增加的功能", "options": [
+    {"key": "A", "label": "图表看板"},
+    {"key": "B", "label": "导出 PDF"}
+  ]},
+  {"type": "TEXT", "title": "其他建议"}
+];
+document.getElementById('questions').value = JSON.stringify(TEMPLATE, null, 2);
+
+async function api(path, options) {
+  const response = await fetch(path, options);
+  let body;
+  try {
+    body = await response.json();
+  } catch (error) {
+    throw new Error('HTTP ' + response.status);
+  }
+  if (!body.ok) {
+    throw new Error(body.error || ('HTTP ' + response.status));
+  }
+  return body.data;
+}
+
+function node(tag, text) {
+  const element = document.createElement(tag);
+  if (text !== undefined) {
+    element.textContent = text;
+  }
+  return element;
+}
+
+function link(href, text) {
+  const element = node('a', text);
+  element.href = href;
+  return element;
+}
+
+function button(text, onClick) {
+  const element = node('button', text);
+  element.type = 'button';
+  element.addEventListener('click', onClick);
+  return element;
+}
+
+async function refresh() {
+  listEl.innerHTML = '';
+  try {
+    const items = await api('/api/questionnaires');
+    if (items.length === 0) {
+      listEl.append(node('li', '还没有问卷，请在下面新建一份。'));
+      return;
+    }
+    for (const q of items) {
+      const item = node('li', null);
+      item.append(`#${q.id}　${q.title}（${q.statusLabel}，共 ${q.questionCount} 题，创建于 ${q.createdAt}）　`);
+      if (q.status === 'PUBLISHED') {
+        item.append(link(`/fill.html?id=${q.id}`, '填写'), '　');
+      }
+      item.append(link(`/stats.html?id=${q.id}`, '统计'), '　');
+      if (q.status === 'DRAFT') {
+        item.append(button('发布', () => action(q.id, 'publish')), '　');
+      }
+      if (q.status !== 'CLOSED') {
+        item.append(button('结束', () => action(q.id, 'close')));
+      }
+      listEl.append(item);
+    }
+  } catch (error) {
+    listEl.append(node('li', '加载失败：' + error.message));
+  }
+}
+
+async function action(id, name) {
+  try {
+    await api(`/api/questionnaires/${id}/${name}`, { method: 'POST' });
+    messageEl.textContent = name === 'publish' ? '已发布，可以开始填写了。' : '已结束收集。';
+    await refresh();
+  } catch (error) {
+    messageEl.textContent = '操作失败：' + error.message;
+  }
+}
+
+document.getElementById('create-form').addEventListener('submit', async (event) => {
+  event.preventDefault();
+  messageEl.textContent = '';
+  let questions;
+  try {
+    questions = JSON.parse(document.getElementById('questions').value);
+  } catch (error) {
+    messageEl.textContent = '题目 JSON 解析失败：' + error.message;
+    return;
+  }
+  try {
+    const created = await api('/api/questionnaires', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: document.getElementById('title').value, questions })
+    });
+    messageEl.textContent = `创建成功：问卷 #${created.id}，当前是草稿，点列表里的「发布」后即可填写。`;
+    await refresh();
+  } catch (error) {
+    messageEl.textContent = '创建失败：' + error.message;
+  }
+});
+
+refresh();
+</script>
+</body>
+</html>
